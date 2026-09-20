@@ -17,4 +17,3 @@ Team Members:
 2. Jack Qian (NetID: cq33; Email: jack.qian@duke.edu)
 3. Caroline Dolan Gilman (NetID: cdd51; Email: carolinedgilman@icloud.com)
 4. Natalie Alba (NetID: na228; Email: natalie.alba@duke.edu)
-========================================================================
