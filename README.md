@@ -15,5 +15,5 @@ Cancer Financial Toxicity & Assistance Matcher
 Team Members:
 1. Wanting Zhao (NetID: wz206; Email: wanting.zhao@duke.edu)
 2. Jack Qian (NetID: cq33; Email: jack.qian@duke.edu)
-3. Caroline Dolan Gilman (NetID: cdd51; Email: carolinedgilman@icloud.com)
+3. Caroline Dolan Gilman (NetID: cdd51; Email: cdd51@duke.edu)
 4. Natalie Alba (NetID: na228; Email: natalie.alba@duke.edu)
