@@ -20,5 +20,4 @@ INSERT INTO lodging_rate VALUES
  (2027,'NC','Wake',        'Raleigh',                       142, 74),
  (2027,'NC','New Hanover', 'Wilmington',                    144, 74);
 
--- PLACEHOLDER value for prototyping only.
-INSERT INTO childcare_rate VALUES ('NC', 15.00, TRUE);
+-- Childcare prices are loaded from seed_childcare.sql (DOL NDCP data).

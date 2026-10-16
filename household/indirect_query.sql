@@ -1,7 +1,7 @@
 -- Indirect cost estimate for one patient.
--- Inputs: :regimen_id, :distance_miles (one way), :state, :county (of the hospital),
---         :as_of (date), :fiscal_year, :lodging_threshold (miles),
---         :has_children (0/1), :childcare_hours_per_visit
+-- Inputs: :regimen_id, :distance_miles (one way), :state, :county (hospital county),
+--         :home_county (patient's county, for childcare), :num_children, :age_group,
+--         :as_of (date), :fiscal_year, :lodging_threshold (miles)
 WITH visits AS (                        -- total hospital visits for the regimen
     SELECT SUM(num_cycles * visits_per_cycle) AS n
     FROM regimen_phase
@@ -14,13 +14,23 @@ mileage AS (                            -- latest IRS medical rate in effect
     ORDER BY effective_date DESC
     LIMIT 1
 ),
-lodging AS (                            -- county rate if listed, else state standard
+lodging AS (                            -- hospital county rate if listed, else state standard
     SELECT COALESCE(c.lodging, s.lodging) AS lodging,
            COALESCE(c.meals,   s.meals)   AS meals
     FROM lodging_rate s
     LEFT JOIN lodging_rate c
       ON c.fiscal_year = s.fiscal_year AND c.state = s.state AND c.county = :county
     WHERE s.fiscal_year = :fiscal_year AND s.state = :state AND s.county = 'STANDARD'
+),
+childcare AS (                          -- home county price if available, else state median
+    SELECT COALESCE(c.weekly_price, s.weekly_price) AS weekly_price
+    FROM childcare_price s
+    LEFT JOIN childcare_price c
+      ON c.state = s.state AND c.study_year = s.study_year AND c.provider = s.provider
+     AND c.age_group = s.age_group AND c.county = :home_county
+    WHERE s.state = :state AND s.county = 'STANDARD'
+      AND s.provider = 'CENTER' AND s.age_group = :age_group
+      AND s.study_year = (SELECT MAX(study_year) FROM childcare_price WHERE state = :state)
 )
 SELECT
     v.n                                                         AS total_visits,
@@ -28,11 +38,10 @@ SELECT
                                                                 AS travel_cost,
     CASE WHEN :distance_miles >= :lodging_threshold
          THEN v.n * (l.lodging + l.meals) ELSE 0 END            AS lodging_cost,
-    CASE WHEN :has_children = 1
-         THEN ROUND(v.n * :childcare_hours_per_visit * cc.hourly_rate, 2)
-         ELSE 0 END                                             AS childcare_cost,
-    m.cents_per_mile, l.lodging, l.meals, cc.hourly_rate
+    -- one day of care per visit = weekly price / 5 weekdays, per child
+    ROUND(v.n * :num_children * cc.weekly_price / 5.0, 2)       AS childcare_cost,
+    m.cents_per_mile, l.lodging, l.meals, cc.weekly_price
 FROM visits v
 CROSS JOIN mileage m
 CROSS JOIN lodging l
-JOIN childcare_rate cc ON cc.state = :state;
+CROSS JOIN childcare cc;

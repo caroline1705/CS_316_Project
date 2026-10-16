@@ -10,19 +10,25 @@ federal poverty guideline (FPL), (2) standard treatment regimens, and
 
 ```bash
 pip install flask
-python3 fpl.py        # creates curebase.db, loads 2026 poverty guidelines, runs tests
-python3 regimen.py    # loads treatment regimens, prints visits/duration
-python3 indirect.py   # loads mileage/lodging/childcare rates, prints sample estimates
-python3 app.py        # starts API at http://127.0.0.1:5001
+python3 init_db.py    # builds curebase.db with all tables and data
+python3 app.py        # web page + API at http://127.0.0.1:5001
 ```
+
+Optional command-line checks: `python3 fpl.py` (FPL tests), `python3 regimen.py`,
+`python3 indirect.py` (sample cost estimates).
 
 ## API
 
 | Endpoint | Example |
 |---|---|
 | `GET /api/fpl` | `/api/fpl?income=60000&size=3&state=NC` → `fpl_percent: 219.6` |
-| `GET /api/indirect-costs` | `/api/indirect-costs?regimen=CRC_FOLFOX&distance=30&county=Durham&children=0` → `total: 338.4` |
+| `GET /api/indirect-costs` | `/api/indirect-costs?regimen=BREAST_ACT_H&distance=150&county=Durham&children=1&home_county=Durham&age_group=PRESCHOOL` → `total: 12246.96` |
+| `GET /api/regimens` | Cancer/regimen options for the dropdown |
+| `GET /api/counties` | NC counties with their own GSA lodging rate |
+| `GET /api/nc-counties` | All 100 NC counties (home county for childcare) |
+| `GET /` | Web page (`templates/household.html`) |
 
+`county` = hospital county (lodging); `home_county` = patient's county (childcare).
 Errors: `400` invalid input, `404` unknown regimen.
 
 ## Files
@@ -31,8 +37,10 @@ Errors: `400` invalid input, `404` unknown regimen.
 |---|---|
 | `schema.sql`, `seed_2026.sql`, `fpl_query.sql` | Poverty guideline tables, 2026 data, FPL query |
 | `schema_regimen.sql`, `seed_regimen.sql`, `regimen_query.sql` | Cancer type / treatment / regimen tables and visit summary query |
-| `schema_indirect.sql`, `seed_indirect.sql`, `indirect_query.sql` | IRS mileage, GSA lodging, childcare rates and cost query |
-| `app.py` | Flask endpoints |
+| `schema_indirect.sql`, `seed_indirect.sql`, `indirect_query.sql` | IRS mileage, GSA lodging, county childcare tables and cost query |
+| `seed_childcare.sql`, `build_childcare_seed.py` | NC childcare prices (generated from the DOL file) |
+| `init_db.py` | Builds the whole database |
+| `app.py`, `templates/household.html` | Flask endpoints and web page |
 
 ## Data sources and status
 
@@ -42,4 +50,4 @@ Errors: `400` invalid input, `404` unknown regimen.
 | 2026 IRS medical mileage rate | irs.gov Standard Mileage Rates | Verified |
 | FY2027 NC lodging per diem | GSA (via FederalPay.org) | To confirm on gsa.gov (seasonal areas) |
 | Treatment regimens | Sample schedules | DRAFT – replace after team picks cancer types; check against NCI |
-| Childcare hourly rate | Placeholder ($15/hr) | TODO – DOL National Database of Childcare Prices |
+| NC childcare prices (100 counties) | U.S. DOL National Database of Childcare Prices, 2022 (latest release), center-based weekly median | Loaded; Graham County has no data and uses the NC median |

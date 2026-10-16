@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CureBase – Household & Indirect Costs</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+</head>
+<body class="bg-light">
+<div class="container py-4" style="max-width: 760px">
+  <h1 class="h3 mb-1">CureBase</h1>
+  <p class="text-muted">Estimate your household eligibility and the hidden costs of cancer treatment.</p>
+
+  <!-- ===== Card 1: FPL calculator (calls /api/fpl) ===== -->
+  <div class="card mb-4">
+    <div class="card-body">
+      <h2 class="h5">1. Household income vs. poverty level</h2>
+      <form id="fpl-form" class="row g-3">
+        <div class="col-sm-4">
+          <label class="form-label" for="size">Household size</label>
+          <input class="form-control" id="size" type="number" min="1" value="3" required>
+        </div>
+        <div class="col-sm-5">
+          <label class="form-label" for="income">Annual household income ($)</label>
+          <input class="form-control" id="income" type="number" min="0" value="60000" required>
+        </div>
+        <div class="col-sm-3">
+          <label class="form-label" for="state">State</label>
+          <select class="form-select" id="state">
+            <option value="NC" selected>NC</option>
+            <option value="AK">AK</option>
+            <option value="HI">HI</option>
+          </select>
+        </div>
+        <div class="col-12"><button class="btn btn-primary">Calculate</button></div>
+      </form>
+      <div id="fpl-result" class="mt-3"></div>
+    </div>
+  </div>
+
+  <!-- ===== Card 2: Indirect costs (calls /api/regimens, /api/counties, /api/indirect-costs) ===== -->
+  <div class="card mb-4">
+    <div class="card-body">
+      <h2 class="h5">2. Travel, lodging and childcare costs</h2>
+      <form id="cost-form" class="row g-3">
+        <div class="col-12">
+          <label class="form-label" for="regimen">Cancer type and treatment</label>
+          <select class="form-select" id="regimen" required></select>
+        </div>
+        <div class="col-sm-6">
+          <label class="form-label" for="county">Hospital county</label>
+          <select class="form-select" id="county"></select>
+        </div>
+        <div class="col-sm-6">
+          <label class="form-label" for="distance">One-way distance to hospital (miles)</label>
+          <input class="form-control" id="distance" type="number" min="0" value="30" required>
+        </div>
+        <div class="col-sm-4">
+          <label class="form-label" for="children">Children needing care</label>
+          <input class="form-control" id="children" type="number" min="0" max="10" value="0">
+        </div>
+        <div class="col-sm-4">
+          <label class="form-label" for="age_group">Children's age</label>
+          <select class="form-select" id="age_group">
+            <option value="INFANT">Infant (0–2)</option>
+            <option value="TODDLER">Toddler (2–3)</option>
+            <option value="PRESCHOOL" selected>Preschool (3–5)</option>
+            <option value="SCHOOL_AGE">School age (5+)</option>
+          </select>
+        </div>
+        <div class="col-sm-4">
+          <label class="form-label" for="home_county">Your home county</label>
+          <select class="form-select" id="home_county"></select>
+        </div>
+        <div class="col-12"><button class="btn btn-primary">Estimate costs</button></div>
+      </form>
+      <div id="cost-result" class="mt-3"></div>
+    </div>
+  </div>
+
+  <p class="small text-muted">Sources: 2026 HHS Poverty Guidelines; IRS 2026 medical mileage rate;
+    GSA FY2027 per diem rates; DOL National Database of Childcare Prices (2022, center-based median).
+    Treatment schedules are sample data.</p>
+</div>
+
+<script>
+const money = n => "$" + Number(n).toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2});
+const showError = (box, msg) => box.innerHTML = `<div class="alert alert-danger mb-0">${msg}</div>`;
+
+// Fill the dropdowns from the database when the page loads
+async function loadOptions() {
+  const regimens = await (await fetch("/api/regimens")).json();
+  document.getElementById("regimen").innerHTML = regimens.map(r =>
+    `<option value="${r.regimen_id}">${r.cancer} – ${r.regimen}</option>`).join("");
+
+  const counties = await (await fetch("/api/counties")).json();
+  document.getElementById("county").innerHTML = counties.map(c =>
+    `<option value="${c.county}">${c.county} County (${c.city})</option>`).join("")
+    + `<option value="OTHER">Other NC county (state standard rate)</option>`;
+  document.getElementById("county").value = "Durham";
+
+  const home = await (await fetch("/api/nc-counties")).json();
+  document.getElementById("home_county").innerHTML =
+    `<option value="">Not sure (NC median)</option>` +
+    home.map(c => `<option value="${c}">${c} County</option>`).join("");
+}
+
+// Card 1: send household info to /api/fpl and show the result
+document.getElementById("fpl-form").addEventListener("submit", async e => {
+  e.preventDefault();
+  const box = document.getElementById("fpl-result");
+  const params = new URLSearchParams({
+    size: document.getElementById("size").value,
+    income: document.getElementById("income").value,
+    state: document.getElementById("state").value,
+  });
+  const res = await fetch("/api/fpl?" + params);
+  const data = await res.json();
+  if (!res.ok) return showError(box, data.error);
+  box.innerHTML = `<div class="alert alert-info mb-0">
+      Your income is <strong>${data.fpl_percent}%</strong> of the federal poverty level
+      (100% = ${money(data.guideline)} for a household of ${data.household_size}).
+    </div>`;
+});
+
+// Card 2: send treatment and travel info to /api/indirect-costs and show a cost table
+document.getElementById("cost-form").addEventListener("submit", async e => {
+  e.preventDefault();
+  const box = document.getElementById("cost-result");
+  const params = new URLSearchParams({
+    regimen: document.getElementById("regimen").value,
+    county: document.getElementById("county").value,
+    distance: document.getElementById("distance").value,
+    children: document.getElementById("children").value || "0",
+    age_group: document.getElementById("age_group").value,
+    home_county: document.getElementById("home_county").value,
+  });
+  const res = await fetch("/api/indirect-costs?" + params);
+  const d = await res.json();
+  if (!res.ok) return showError(box, d.error);
+  box.innerHTML = `
+    <p class="mb-2">About <strong>${d.total_visits} hospital visits</strong> for this treatment.</p>
+    <table class="table table-sm mb-0">
+      <tr><td>Travel (${d.cents_per_mile}¢ per mile, round trip)</td><td class="text-end">${money(d.travel)}</td></tr>
+      <tr><td>Lodging and meals (if 100+ miles away)</td><td class="text-end">${money(d.lodging)}</td></tr>
+      <tr><td>Childcare (${d.children} child${d.children == 1 ? "" : "ren"}, ${money(d.childcare_weekly)}/week ÷ 5 per visit day)</td><td class="text-end">${money(d.childcare)}</td></tr>
+      <tr class="fw-bold"><td>Total non-medical cost</td><td class="text-end">${money(d.total)}</td></tr>
+    </table>`;
+});
+
+loadOptions();
+</script>
+</body>
+</html>
