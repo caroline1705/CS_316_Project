@@ -4,7 +4,7 @@
 CompSci 316 Fall 2026 - Milestone 1 README
 
 Team Name:
-CareBase
+CureBase
 
 Project Choice:
 Open Project Option
