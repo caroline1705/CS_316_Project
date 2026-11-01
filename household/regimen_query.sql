@@ -1,4 +1,5 @@
 -- Summary per regimen: total hospital visits and total length in weeks.
+-- Optional filters: :cancer_id, :regimen_id (pass NULL to skip).
 -- Radiation is daily on weekdays, so 15 sessions = 3 weeks (5 per week).
 SELECT
     r.regimen_id,
@@ -14,5 +15,6 @@ FROM regimen r
 JOIN cancer_type   c ON c.cancer_id  = r.cancer_id
 JOIN regimen_phase p ON p.regimen_id = r.regimen_id
 WHERE (:cancer_id IS NULL OR r.cancer_id = :cancer_id)
+  AND (:regimen_id IS NULL OR r.regimen_id = :regimen_id)
 GROUP BY r.regimen_id, c.name, r.name
 ORDER BY r.regimen_id;

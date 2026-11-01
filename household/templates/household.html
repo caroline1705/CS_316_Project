@@ -38,18 +38,25 @@
     </div>
   </div>
 
-  <!-- ===== Card 2: Indirect costs (calls /api/regimens, /api/counties, /api/indirect-costs) ===== -->
+  <!-- ===== Card 2: Indirect costs
+       (calls /api/cancers, /api/regimens, /api/regimen-detail, /api/hospitals,
+        /api/nc-counties, /api/indirect-costs) ===== -->
   <div class="card mb-4">
     <div class="card-body">
       <h2 class="h5">2. Travel, lodging and childcare costs</h2>
       <form id="cost-form" class="row g-3">
-        <div class="col-12">
-          <label class="form-label" for="regimen">Cancer type and treatment</label>
+        <div class="col-sm-5">
+          <label class="form-label" for="cancer">Cancer type</label>
+          <select class="form-select" id="cancer" required></select>
+        </div>
+        <div class="col-sm-7">
+          <label class="form-label" for="regimen">Treatment plan</label>
           <select class="form-select" id="regimen" required></select>
         </div>
+        <div class="col-12" id="regimen-detail"></div>
         <div class="col-sm-6">
-          <label class="form-label" for="county">Hospital county</label>
-          <select class="form-select" id="county"></select>
+          <label class="form-label" for="hospital">Hospital</label>
+          <select class="form-select" id="hospital" required></select>
         </div>
         <div class="col-sm-6">
           <label class="form-label" for="distance">One-way distance to hospital (miles)</label>
@@ -79,8 +86,9 @@
   </div>
 
   <p class="small text-muted">Sources: 2026 HHS Poverty Guidelines; IRS 2026 medical mileage rate;
-    GSA FY2027 per diem rates; DOL National Database of Childcare Prices (2022, center-based median).
-    Treatment schedules are sample data.</p>
+    GSA FY2027 per diem rates; DOL National Database of Childcare Prices (2022, center-based median);
+    treatment schedules from published protocols and trials (linked under each plan).
+    Treatment plans are typical examples; a patient's actual plan is set by their care team.</p>
 </div>
 
 <script>
@@ -89,21 +97,50 @@ const showError = (box, msg) => box.innerHTML = `<div class="alert alert-danger 
 
 // Fill the dropdowns from the database when the page loads
 async function loadOptions() {
-  const regimens = await (await fetch("/api/regimens")).json();
-  document.getElementById("regimen").innerHTML = regimens.map(r =>
-    `<option value="${r.regimen_id}">${r.cancer} – ${r.regimen}</option>`).join("");
+  const cancers = await (await fetch("/api/cancers")).json();
+  document.getElementById("cancer").innerHTML = cancers.map(c =>
+    `<option value="${c.cancer_id}">${c.name} (ICD-10 ${c.icd10})</option>`).join("");
+  await loadRegimens();
 
-  const counties = await (await fetch("/api/counties")).json();
-  document.getElementById("county").innerHTML = counties.map(c =>
-    `<option value="${c.county}">${c.county} County (${c.city})</option>`).join("")
-    + `<option value="OTHER">Other NC county (state standard rate)</option>`;
-  document.getElementById("county").value = "Durham";
+  const hospitals = await (await fetch("/api/hospitals")).json();
+  document.getElementById("hospital").innerHTML = hospitals.map(h =>
+    `<option value="${h.hospital_id}">${h.name} – ${h.city}</option>`).join("");
+  document.getElementById("hospital").value = "DUKE";
 
   const home = await (await fetch("/api/nc-counties")).json();
   document.getElementById("home_county").innerHTML =
     `<option value="">Not sure (NC median)</option>` +
     home.map(c => `<option value="${c}">${c} County</option>`).join("");
 }
+
+// Two-level menu: the treatment plans depend on the cancer type
+async function loadRegimens() {
+  const cancer = document.getElementById("cancer").value;
+  const regimens = await (await fetch("/api/regimens?cancer=" + encodeURIComponent(cancer))).json();
+  document.getElementById("regimen").innerHTML = regimens.map(r =>
+    `<option value="${r.regimen_id}">${r.regimen}</option>`).join("");
+  await showRegimenDetail();
+}
+
+// Show the phases, total visits and duration of the selected plan
+async function showRegimenDetail() {
+  const box = document.getElementById("regimen-detail");
+  const regimen = document.getElementById("regimen").value;
+  if (!regimen) { box.innerHTML = ""; return; }
+  const d = await (await fetch("/api/regimen-detail?regimen=" + encodeURIComponent(regimen))).json();
+  const every = p => p.cycle_days === 1 ? `${p.cycles} weekday sessions`
+      : `every ${p.cycle_days % 7 === 0 ? (p.cycle_days / 7) + " week" + (p.cycle_days === 7 ? "" : "s") : p.cycle_days + " days"} × ${p.cycles}`;
+  box.innerHTML = `<div class="border rounded bg-light p-2 small">
+      <div class="fw-semibold mb-1">${d.total_visits} hospital visits over about ${d.total_weeks} weeks</div>
+      <ol class="mb-1 ps-3">${d.phases.map(p =>
+        `<li>${p.treatment}: ${every(p)}${p.visits_per_cycle > 1 ? ` (${p.visits_per_cycle} visits each)` : ""}
+         <span class="text-muted">– starts week ${p.start_week}, ${p.visits} visits</span></li>`).join("")}</ol>
+      <a href="${d.source_url}" target="_blank" rel="noopener">Source</a>
+    </div>`;
+}
+
+document.getElementById("cancer").addEventListener("change", loadRegimens);
+document.getElementById("regimen").addEventListener("change", showRegimenDetail);
 
 // Card 1: send household info to /api/fpl and show the result
 document.getElementById("fpl-form").addEventListener("submit", async e => {
@@ -129,7 +166,7 @@ document.getElementById("cost-form").addEventListener("submit", async e => {
   const box = document.getElementById("cost-result");
   const params = new URLSearchParams({
     regimen: document.getElementById("regimen").value,
-    county: document.getElementById("county").value,
+    hospital: document.getElementById("hospital").value,
     distance: document.getElementById("distance").value,
     children: document.getElementById("children").value || "0",
     age_group: document.getElementById("age_group").value,
@@ -138,14 +175,24 @@ document.getElementById("cost-form").addEventListener("submit", async e => {
   const res = await fetch("/api/indirect-costs?" + params);
   const d = await res.json();
   if (!res.ok) return showError(box, d.error);
+  // Tell the user when data was missing and a fallback was used
+  const notes = [];
+  if (d.lodging_is_standard)
+    notes.push(`${d.county} County has no GSA county rate, so the NC standard lodging rate is used.`);
+  if (d.children > 0 && d.childcare_is_median)
+    notes.push(d.home_county
+      ? `No DOL childcare data for ${d.home_county} County, so the NC median is used.`
+      : `Home county not given, so the NC median childcare price is used.`);
+  notes.push(`Assumes one overnight stay per visit when the hospital is 100+ miles away, and one day of childcare per visit.`);
   box.innerHTML = `
-    <p class="mb-2">About <strong>${d.total_visits} hospital visits</strong> for this treatment.</p>
+    <p class="mb-2">About <strong>${d.total_visits} hospital visits</strong> to ${d.hospital_name} (${d.county} County).</p>
     <table class="table table-sm mb-0">
       <tr><td>Travel (${d.cents_per_mile}¢ per mile, round trip)</td><td class="text-end">${money(d.travel)}</td></tr>
       <tr><td>Lodging and meals (if 100+ miles away)</td><td class="text-end">${money(d.lodging)}</td></tr>
       <tr><td>Childcare (${d.children} child${d.children == 1 ? "" : "ren"}, ${money(d.childcare_weekly)}/week ÷ 5 per visit day)</td><td class="text-end">${money(d.childcare)}</td></tr>
       <tr class="fw-bold"><td>Total non-medical cost</td><td class="text-end">${money(d.total)}</td></tr>
-    </table>`;
+    </table>
+    <ul class="small text-muted mt-2 mb-0">${notes.map(n => `<li>${n}</li>`).join("")}</ul>`;
 });
 
 loadOptions();

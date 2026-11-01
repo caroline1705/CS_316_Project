@@ -1,5 +1,6 @@
 -- CureBase: Indirect (non-medical) cost module (owner: Wanting)
 
+DROP TABLE IF EXISTS hospital;
 DROP TABLE IF EXISTS mileage_rate;
 DROP TABLE IF EXISTS lodging_rate;
 DROP TABLE IF EXISTS childcare_price;
@@ -48,4 +49,15 @@ CREATE TABLE childcare_price (
                   CHECK (age_group IN ('INFANT','TODDLER','PRESCHOOL','SCHOOL_AGE')),
     weekly_price  DECIMAL(7,2) NOT NULL CHECK (weekly_price > 0),
     PRIMARY KEY (state, county, study_year, provider, age_group)
+);
+
+-- The five hospitals in our scope. Each hospital's county decides its lodging rate.
+-- (Shared with the medical-cost module; that module can add columns as needed.)
+CREATE TABLE hospital (
+    hospital_id  VARCHAR(16) PRIMARY KEY,
+    name         VARCHAR(128) NOT NULL,
+    city         VARCHAR(64) NOT NULL,
+    state        CHAR(2) NOT NULL,
+    county       VARCHAR(32) NOT NULL,
+    FOREIGN KEY (state, county) REFERENCES county(state, county)
 );

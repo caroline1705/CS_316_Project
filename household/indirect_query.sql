@@ -16,14 +16,16 @@ mileage AS (                            -- latest IRS medical rate in effect
 ),
 lodging AS (                            -- hospital county rate if listed, else state standard
     SELECT COALESCE(c.lodging, s.lodging) AS lodging,
-           COALESCE(c.meals,   s.meals)   AS meals
+           COALESCE(c.meals,   s.meals)   AS meals,
+           c.lodging IS NULL              AS lodging_is_standard
     FROM lodging_rate s
     LEFT JOIN lodging_rate c
       ON c.fiscal_year = s.fiscal_year AND c.state = s.state AND c.county = :county
     WHERE s.fiscal_year = :fiscal_year AND s.state = :state AND s.county = 'STANDARD'
 ),
 childcare AS (                          -- home county price if available, else state median
-    SELECT COALESCE(c.weekly_price, s.weekly_price) AS weekly_price
+    SELECT COALESCE(c.weekly_price, s.weekly_price) AS weekly_price,
+           c.weekly_price IS NULL                   AS childcare_is_median
     FROM childcare_price s
     LEFT JOIN childcare_price c
       ON c.state = s.state AND c.study_year = s.study_year AND c.provider = s.provider
@@ -40,7 +42,8 @@ SELECT
          THEN v.n * (l.lodging + l.meals) ELSE 0 END            AS lodging_cost,
     -- one day of care per visit = weekly price / 5 weekdays, per child
     ROUND(v.n * :num_children * cc.weekly_price / 5.0, 2)       AS childcare_cost,
-    m.cents_per_mile, l.lodging, l.meals, cc.weekly_price
+    m.cents_per_mile, l.lodging, l.meals, cc.weekly_price,
+    l.lodging_is_standard, cc.childcare_is_median
 FROM visits v
 CROSS JOIN mileage m
 CROSS JOIN lodging l

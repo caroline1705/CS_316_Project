@@ -17,7 +17,7 @@ CREATE TABLE treatment (
     treatment_id  VARCHAR(32) PRIMARY KEY,         -- e.g. 'AC'
     name          VARCHAR(128) NOT NULL,
     modality      VARCHAR(16) NOT NULL
-                  CHECK (modality IN ('CHEMO','TARGETED','IMMUNO','RADIATION','SURGERY'))
+                  CHECK (modality IN ('CHEMO','TARGETED','IMMUNO','HORMONE','RADIATION','CHEMORADIATION','SURGERY'))
 );
 
 -- A standard treatment plan for one cancer type.

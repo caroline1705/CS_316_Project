@@ -10,6 +10,7 @@ SCRIPTS = [
     "schema_regimen.sql", "seed_regimen.sql",         # treatment regimens
     "schema_indirect.sql", "seed_indirect.sql",       # mileage / lodging
     "seed_childcare.sql",                             # DOL county childcare prices
+    "seed_hospital.sql",                              # hospitals in scope
 ]
 
 if __name__ == "__main__":

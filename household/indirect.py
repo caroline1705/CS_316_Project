@@ -1,5 +1,6 @@
 """Indirect cost prototype (SQLite). Run AFTER init_db.py:  python3 indirect.py"""
 import sqlite3
+from datetime import date
 from pathlib import Path
 
 HERE = Path(__file__).parent
@@ -11,7 +12,16 @@ AGE_GROUPS = ("INFANT", "TODDLER", "PRESCHOOL", "SCHOOL_AGE")
 
 def indirect_costs(conn, regimen_id, distance_miles, county, num_children=0,
                    home_county=None, age_group="PRESCHOOL", state="NC",
-                   as_of="2026-10-16", fiscal_year=2027):
+                   as_of=None, fiscal_year=None):
+    # Default to today's IRS rate and the latest GSA fiscal year we have loaded
+    # (the federal fiscal year starts Oct 1, so Oct 2026 is FY2027).
+    today = date.today()
+    as_of = as_of or today.isoformat()
+    if fiscal_year is None:
+        wanted = today.year + 1 if today.month >= 10 else today.year
+        fiscal_year = conn.execute(
+            "SELECT MAX(fiscal_year) FROM lodging_rate WHERE state = ? AND fiscal_year <= ?",
+            (state, wanted)).fetchone()[0]
     sql = (HERE / "indirect_query.sql").read_text()
     row = conn.execute(sql, {
         "regimen_id": regimen_id, "distance_miles": distance_miles,
@@ -21,8 +31,11 @@ def indirect_costs(conn, regimen_id, distance_miles, county, num_children=0,
         "lodging_threshold": LODGING_THRESHOLD_MILES,
     }).fetchone()
     keys = ["total_visits", "travel", "lodging", "childcare",
-            "cents_per_mile", "lodging_rate", "meals_rate", "childcare_weekly"]
+            "cents_per_mile", "lodging_rate", "meals_rate", "childcare_weekly",
+            "lodging_is_standard", "childcare_is_median"]
     r = dict(zip(keys, row))
+    r["lodging_is_standard"] = bool(r["lodging_is_standard"])
+    r["childcare_is_median"] = bool(r["childcare_is_median"])
     r["total"] = round(r["travel"] + r["lodging"] + r["childcare"], 2)
     return r
 

@@ -15,9 +15,9 @@ def init_db():
     return conn
 
 
-def regimen_summary(conn, cancer_id=None):
+def regimen_summary(conn, cancer_id=None, regimen_id=None):
     sql = (HERE / "regimen_query.sql").read_text()
-    return conn.execute(sql, {"cancer_id": cancer_id}).fetchall()
+    return conn.execute(sql, {"cancer_id": cancer_id, "regimen_id": regimen_id}).fetchall()
 
 
 if __name__ == "__main__":
