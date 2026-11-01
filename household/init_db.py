@@ -11,6 +11,8 @@ SCRIPTS = [
     "schema_indirect.sql", "seed_indirect.sql",       # mileage / lodging
     "seed_childcare.sql",                             # DOL county childcare prices
     "seed_hospital.sql",                              # hospitals in scope
+    "../assistance/schema_assistance.sql",            # assistance tables
+    "../assistance/generated_assistance_seed.sql",    # assistance program data
 ]
 
 if __name__ == "__main__":
