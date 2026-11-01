@@ -154,6 +154,8 @@ print(cancer_insert_statements[0])
 print("Last cancer INSERT:")
 print(cancer_insert_statements[-1])
 
+##Work for insurance table
+
 insurance_insert_statements = []
 for program in programs:
     program_id = program["program_id"]
