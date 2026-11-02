@@ -1,378 +1,222 @@
-
 import sqlite3
 from pathlib import Path
 
-HERE = Path(__file__).parent
-DB = HERE.parent / "household" / "curebase_test.db"
+HERE = Path(__file__).resolve().parent
+DB = HERE.parent / "household" / "curebase.db"  ##tested on test version but never initialized curebase yet
 QUERY_FILE = HERE / "assistance_query.sql"
+
+
+def _connect():
+    conn = sqlite3.connect(DB)
+    conn.row_factory = sqlite3.Row
+    return conn
 
 
 def find_assistance_by_cancer(cancer_type):
     query = QUERY_FILE.read_text(encoding="utf-8")
-    conn = sqlite3.connect(DB)
-    conn.row_factory = sqlite3.Row
-
-    try:
+    with _connect() as conn:
         rows = conn.execute(query, (cancer_type,)).fetchall()
-        return [dict(row) for row in rows]
-    finally:
-        conn.close()
+        programs = [dict(row) for row in rows]
+        ids = sorted({p["program_id"] for p in programs})
+        if not ids:
+            return []
+        placeholders = ", ".join("?" for _ in ids)
+        geography_rows = conn.execute(
+            "SELECT program_id, rule_group, location_type, country, state, county "
+            "FROM assistance_program_geography "
+            f"WHERE program_id IN ({placeholders}) "
+            "ORDER BY program_id, rule_group, geography_id",
+            ids,
+        ).fetchall()
+
+    rules_by_id = {program_id: [] for program_id in ids}
+    for row in geography_rows:
+        rule = dict(row)
+        rules_by_id[rule["program_id"]].append(rule)
+    for program in programs:
+        program["geography_rules"] = rules_by_id[program["program_id"]]
+    return programs
+
+
+def _insurance_types(program):
+    value = program.get("accepted_insurance_types")
+    return {part.strip().lower() for part in (value or "").split(",") if part.strip()}
 
 
 def matches_insurance(program, patient_insurance):
-    coverage = program["insurance_coverage"]
-    accepted = program["accepted_insurance_types"]
+    accepted = _insurance_types(program)
+    if patient_insurance == "Uninsured":
+        additional = (
+            program.get("additional_insurance_requirements") or ""
+        ).lower()
 
-    is_insured = patient_insurance != "Uninsured"
-
-    if coverage == "Insured" and not is_insured:
-        return False
-
+        if "insurance must cover" in additional:
+            return False
     if not accepted:
+        return True  # No insurance restriction recorded
+    if patient_insurance is None or str(patient_insurance).strip().lower() == "unknown":
+        return True  # Potential match; information is incomplete
+
+    patient = str(patient_insurance).strip().lower()
+    if patient in accepted:
         return True
-
-    if not is_insured:
-        return False
-
-    accepted_types = [
-        item.strip() for item in accepted.split(",")
-    ]
-
-    if patient_insurance in accepted_types:
+    if patient != "uninsured" and "any_insured" in accepted:
         return True
-
-    if "Government insurance (unspecified)" in accepted_types:
-        return patient_insurance in ("Medicare", "Medicaid")
-
+    if patient in {"medicare", "medicaid", "tricare", "veterans"} and (
+        "government insurance (unspecified)" in accepted
+    ):
+        return True
     return False
 
 def matches_income(program, patient_fpl):
-    income_limit = program["income_limit_fpl"]
+    limit = program["income_limit_fpl"]
+    return limit is None or patient_fpl is None or patient_fpl <= limit
 
-    if income_limit is None:
-        return True
-
-    if patient_fpl is None:
-        return True
-
-    return patient_fpl <= income_limit
 
 def matches_age(program, patient_age):
     min_age = program["min_age"]
     max_age = program["max_age"]
-
-    if min_age is None and max_age is None:
-        return True
-
     if patient_age is None:
         return True
+    return ((min_age is None or patient_age >= min_age)
+            and (max_age is None or patient_age <= max_age))
 
-    if min_age is not None and patient_age < min_age:
-        return False
-
-    if max_age is not None and patient_age > max_age:
-        return False
-
-    return True
 
 def matches_cancer_subtype(program, patient_subtype):
-    required_subtype = program["cancer_subtype"]
-
-    if not required_subtype:
+    required = program["cancer_subtype"]
+    if not required or not patient_subtype or str(patient_subtype).lower() == "unknown":
         return True
-
-    if not patient_subtype or patient_subtype == "Unknown":
-        return True
-
-    return (
-        required_subtype.strip().lower()
-        == patient_subtype.strip().lower()
-    )
+    return required.strip().casefold() == patient_subtype.strip().casefold()
 
 
-def matches_residency(
-    program,
-    patient_country,
-    patient_state=None,
-    patient_county=None,
-    citizenship_status=None,
-    treatment_country=None,
-    treatment_state=None,
-    treatment_county=None
-):
-    requirement = program["residency_requirements"]
+def _country(value):
+    if value is None:
+        return None
+    aliases = {
+        "united states": "US", "usa": "US", "u.s.": "US",
+        "canada": "CA", "territory": "TERRITORY", "us territory": "TERRITORY", "u.s. territory": "TERRITORY",
+    }
+    normalized = str(value).strip()
+    return aliases.get(normalized.casefold(), normalized.upper())
 
-    if not requirement:
+
+def _region(value):
+    if value is None or str(value).strip().casefold() == "unknown":
+        return None
+    return str(value).strip().upper()
+
+
+def _county(value):
+    if value is None or str(value).strip().casefold() == "unknown":
+        return None
+    name = str(value).strip().casefold()
+    return name.removesuffix(" county").strip()
+
+
+def _location_match(rule, patient_country, patient_state, patient_county,
+                    treatment_country, treatment_state, treatment_county):
+    if rule["location_type"] == "residence":
+        country, state, county = patient_country, patient_state, patient_county
+    elif rule["location_type"] == "treatment":
+        country, state, county = treatment_country, treatment_state, treatment_county
+    else:
+        raise ValueError(f"Unknown location_type: {rule['location_type']}")
+
+    country = _country(country)
+    required_country = _country(rule["country"])
+    if country is None or country == "UNKNOWN":
+        return "needs_review"
+    if country != required_country:
+        return "no_match"
+
+    required_state = _region(rule["state"])
+    if required_state is not None:
+        state = _region(state)
+        if state is None:
+            return "needs_review"
+        if state != required_state:
+            return "no_match"
+
+    required_county = _county(rule["county"])
+    if required_county is not None:
+        county = _county(county)
+        if county is None:
+            return "needs_review"
+        if county != required_county:
+            return "no_match"
+    return "match"
+
+def matches_residency(program, patient_country, patient_state=None,
+                      patient_county=None, citizenship_status=None,
+                      treatment_country=None, treatment_state=None,
+                      treatment_county=None):
+    """OR rules within each group, AND across groups; missing data needs review."""
+    rules = program.get("geography_rules", [])
+    if not rules:
         return "match"
 
-    # Return needs_review when information is insufficient.
-    # This is an internal matching result, not a patient-facing
-    # eligibility classification.
+    groups = {}
+    for rule in rules:
+        groups.setdefault(rule["rule_group"], []).append(rule)
 
-    def check_country(allowed):
-        if not patient_country:
-            return "needs_review"
-        return (
-            "match"
-            if patient_country in allowed
-            else "no_match"
-        )
-
-    def check_treatment_country(allowed):
-        if not treatment_country or treatment_country == "Unknown":
-            return "needs_review"
-        return (
-            "match"
-            if treatment_country in allowed
-            else "no_match"
-        )
-
-    # P003: United States or U.S. territory
-    if requirement == "United States or U.S. Territory":
-        return check_country(("US", "Territory"))
-
-    # P018: North Carolina or South Carolina resident
-    if requirement == "North Carolina or South Carolina resident":
-        if patient_country and patient_country != "US":
+    has_unknown = False
+    for group_rules in groups.values():
+        outcomes = [
+            _location_match(rule, patient_country, patient_state, patient_county,
+                            treatment_country, treatment_state, treatment_county)
+            for rule in group_rules
+        ]
+        if "match" in outcomes:
+            continue
+        if "needs_review" in outcomes:
+            has_unknown = True
+        else:
             return "no_match"
-
-        if not patient_state:
-            return "needs_review"
-
-        return (
-            "match"
-            if patient_state in ("NC", "SC")
-            else "no_match"
-        )
-
-    # P019: North Carolina resident
-    if requirement == "North Carolina resident":
-        if patient_country and patient_country != "US":
-            return "no_match"
-
-        if not patient_state:
-            return "needs_review"
-
-        return "match" if patient_state == "NC" else "no_match"
-
-    # P020/P021: Must reside in the United States
-    if requirement == "Must reside in the United States":
-        return check_country(("US",))
-
-    # P027: United States or Canada
-    if requirement == "Must live in the United States or Canada":
-        return check_country(("US", "CA"))
-
-    # P008: Must live OR receive treatment in one of
-    # four North Carolina counties.
-    if requirement == (
-        "Must live or receive treatment in Wayne, Sampson, "
-        "Onslow, or Lenoir County, North Carolina"
-    ):
-        allowed_counties = {
-            "wayne", "sampson", "onslow", "lenoir"
-        }
-
-        def normalize_county(value):
-            if not value:
-                return None
-            return value.strip().lower().replace(" county", "")
-
-        home_county = normalize_county(patient_county)
-        care_county = normalize_county(treatment_county)
-
-        home_match = (
-            patient_country == "US"
-            and patient_state == "NC"
-            and home_county in allowed_counties
-        )
-
-        treatment_match = (
-            treatment_country == "US"
-            and treatment_state == "NC"
-            and care_county in allowed_counties
-        )
-
-        if home_match or treatment_match:
-            return "match"
-
-        # The intake form uses "Other" for counties outside
-        # the four named counties.
-        home_known = (
-            patient_country is not None
-            and (
-                patient_country != "US"
-                or (
-                    patient_state is not None
-                    and (
-                        patient_state != "NC"
-                        or home_county not in (None, "unknown")
-                    )
-                )
-            )
-        )
-
-        treatment_known = (
-            treatment_country not in (None, "Unknown")
-            and (
-                treatment_country != "US"
-                or (
-                    treatment_state is not None
-                    and (
-                        treatment_state != "NC"
-                        or care_county not in (None, "unknown")
-                    )
-                )
-            )
-        )
-
-        if home_known and treatment_known:
-            return "no_match"
-
-        return "needs_review"
-
-    # P009-P017: Citizenship or permanent residency,
-    # plus residence in the United States or a territory.
-    if requirement == (
-        "U.S. citizen or permanent resident residing "
-        "in the U.S. or a U.S. territory"
-    ):
-        if patient_country and patient_country not in ("US", "Territory"):
-            return "no_match"
-
-        if citizenship_status == "No":
-            return "no_match"
-
-        if (
-            patient_country in ("US", "Territory")
-            and citizenship_status == "Yes"
-        ):
-            return "match"
-
-        return "needs_review"
-
-    # P004/P005: Legal U.S. residence and treatment
-    # in the United States or a territory.
-    if requirement == (
-        "Legal resident of the U.S. or U.S. territory; "
-        "must receive treatment there"
-    ):
-        if patient_country and patient_country not in ("US", "Territory"):
-            return "no_match"
-
-        if treatment_country not in (None, "Unknown", "US", "Territory"):
-            return "no_match"
-
-        if (
-            patient_country in ("US", "Territory")
-            and treatment_country in ("US", "Territory")
-        ):
-            # The form does not establish every category
-            # of legal U.S. residency.
-            return "needs_review"
-
-        return "needs_review"
-
-    # P026: Legal residency and treatment in the U.S.
-    # or a U.S. territory.
-    if requirement == (
-        "Legal resident of the United States or a U.S. territory; "
-        "must receive treatment in the U.S. or a U.S. territory"
-    ):
-        if patient_country and patient_country not in ("US", "Territory"):
-            return "no_match"
-
-        if treatment_country not in (None, "Unknown", "US", "Territory"):
-            return "no_match"
-
-        return "needs_review"
-
-    # P006/P007: U.S. resident receiving U.S. treatment.
-    if requirement == "U.S. resident receiving treatment in the U.S.":
-        if patient_country and patient_country != "US":
-            return "no_match"
-
-        if treatment_country not in (None, "Unknown", "US"):
-            return "no_match"
-
-        if patient_country == "US" and treatment_country == "US":
-            return "match"
-
-        return "needs_review"
-
-    # P023/P028/P029/P030: Treatment in the United States.
-    if requirement == "Must receive treatment in the United States":
-        return check_treatment_country(("US",))
-
-    # P022/P024/P025: Valid SSN and U.S. treatment.
-    # Do not collect an actual Social Security number.
-    if requirement == (
-        "Must have a valid Social Security number and receive "
-        "treatment in the United States; citizenship or legal "
-        "permanent residency not explicitly required"
-    ):
-        treatment_result = check_treatment_country(("US",))
-
-        if treatment_result == "no_match":
-            return "no_match"
-
-        # The form does not ask whether the patient has
-        # a valid SSN, so this requirement remains unverified.
-        return "needs_review"
-
-    # Unknown or differently worded requirements
-    # should not automatically exclude a patient.
-    return "needs_review"
+    return "needs_review" if has_unknown else "match"
 
 
-def find_matching_assistance(
-    cancer_type,
-    cancer_subtype=None,
-    insurance=None,
-    fpl_percent=None,
-    age=None,
-    country=None,
-    state=None,
-    county=None,
-    citizenship_status=None,
-    treatment_country=None,
-    treatment_state=None,
-    treatment_county=None
-):
+def find_matching_assistance(cancer_type, cancer_subtype=None, insurance=None,
+                             fpl_percent=None, age=None, country=None,
+                             state=None, county=None, citizenship_status=None,
+                             treatment_country="US", treatment_state="NC",
+                             treatment_county=None):
     programs = find_assistance_by_cancer(cancer_type)
     results = []
+    seen = set()
 
     for program in programs:
         if not matches_cancer_subtype(program, cancer_subtype):
             continue
-
-        if insurance is not None:
-            if not matches_insurance(program, insurance):
-                continue
-
+        if insurance is not None and not matches_insurance(program, insurance):
+            continue
         if not matches_income(program, fpl_percent):
             continue
-
         if not matches_age(program, age):
             continue
 
         residency_status = matches_residency(
-            program,
-            patient_country=country,
-            patient_state=state,
-            patient_county=county,
-            citizenship_status=citizenship_status,
-            treatment_country=treatment_country,
-            treatment_state=treatment_state,
-            treatment_county=treatment_county
+            program, patient_country=country, patient_state=state,
+            patient_county=county, citizenship_status=citizenship_status,
+            treatment_country=treatment_country, treatment_state=treatment_state,
+            treatment_county=treatment_county,
         )
-
         if residency_status == "no_match":
             continue
-
+        if program["program_id"] in seen:
+            continue
+        seen.add(program["program_id"])
         program["residency_status"] = residency_status
         program["eligibility_status"] = "potential_match"
-
+        program["manual_review_required"] = bool(
+            residency_status == "needs_review"
+            or program.get("additional_insurance_requirements")
+            or program.get("other_eligibility_requirements")
+            or program.get("other_income_requirements")
+            or program.get("notes")
+            or insurance is None
+            or fpl_percent is None
+            or age is None
+            or not cancer_subtype
+        )
         results.append(program)
-
     return results

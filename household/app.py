@@ -7,6 +7,12 @@ from fpl import DB, fpl_percent
 from indirect import indirect_costs, AGE_GROUPS
 from regimen import regimen_summary
 
+## Added this chunk to allow Flask to import the assistance matching functions from my module
+import sys
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+from assistance.assistance import find_matching_assistance
+
 HERE = Path(__file__).parent
 app = Flask(__name__)
 
@@ -170,6 +176,37 @@ def api_indirect_costs():
                    county=county, distance_miles=distance, children=children,
                    home_county=home_county, age_group=age_group, **result)
 
+
+
+# ---------------------------------------------------------------- assistance programs
+@app.get("/api/assistance")
+def api_assistance():
+    cancer = request.args.get("cancer")
+    if not cancer:
+        return jsonify(error="cancer is required"), 400
+
+    try:
+        fpl = request.args.get("fpl_percent", type=float)
+        age = request.args.get("age", type=int)
+
+        results = find_matching_assistance(
+            cancer_type=cancer,
+            cancer_subtype=request.args.get("cancer_subtype"),
+            insurance=request.args.get("insurance"),
+            fpl_percent=fpl,
+            age=age,
+            country=request.args.get("country"),
+            state=request.args.get("state"),
+            county=request.args.get("county"),
+            citizenship_status=request.args.get("citizenship_status"),
+            treatment_country=request.args.get("treatment_country"),
+            treatment_state=request.args.get("treatment_state"),
+            treatment_county=request.args.get("treatment_county")
+        )
+    except (ValueError, TypeError) as e:
+        return jsonify(error=str(e)), 400
+
+    return jsonify(results)
 
 if __name__ == "__main__":
     app.run(debug=True, port=5001)

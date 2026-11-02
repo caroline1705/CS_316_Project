@@ -3,7 +3,6 @@ CREATE TABLE IF NOT EXISTS assistance_program (
     program_id TEXT PRIMARY KEY,
     program_name TEXT NOT NULL,
     organization TEXT,
-    residency_requirements TEXT,
     additional_insurance_requirements TEXT,
     income_limit_fpl REAL,
     other_income_requirements TEXT,
@@ -13,9 +12,13 @@ CREATE TABLE IF NOT EXISTS assistance_program (
     application_url TEXT,
     source_url TEXT,
     notes TEXT,
-    insurance_coverage TEXT,
     min_age INTEGER,
-    max_age INTEGER
+    max_age INTEGER,
+
+    CHECK (min_age IS NULL OR min_age >= 0),
+    CHECK (max_age IS NULL OR max_age >= 0),
+    CHECK (min_age IS NULL OR max_age IS NULL OR min_age <= max_age),
+    CHECK (income_limit_fpl IS NULL OR income_limit_fpl >= 0)
 );
 
 -- Cancer Table: This table will link assistance programs with the actual cancer types/subtypes
@@ -36,3 +39,24 @@ CREATE TABLE IF NOT EXISTS assistance_program_insurance (
     FOREIGN KEY (program_id)
         REFERENCES assistance_program(program_id)
 );
+
+-- Geography Table: this table will look at the treatmend/residency conditions
+CREATE TABLE IF NOT EXISTS assistance_program_geography (
+    geography_id INTEGER PRIMARY KEY,
+    program_id TEXT NOT NULL,
+    rule_group INTEGER NOT NULL DEFAULT 1,
+    location_type TEXT NOT NULL
+        CHECK (location_type IN ('residence', 'treatment')),
+    country TEXT NOT NULL,
+    state TEXT,
+    county TEXT,
+
+    FOREIGN KEY (program_id)
+        REFERENCES assistance_program(program_id),
+
+    CHECK (rule_group >= 1),
+    CHECK (county IS NULL OR state IS NOT NULL)
+);
+
+CREATE INDEX IF NOT EXISTS idx_assistance_geography_program
+ON assistance_program_geography(program_id);

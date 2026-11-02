@@ -18,6 +18,25 @@ for row in sheet.iter_rows(min_row=2, values_only=True):
     program = dict(zip(headers, row))
     programs.append(program)
 
+geography_sheet = workbook["Geography Rules"]
+
+geography_headers = [
+    cell.value for cell in geography_sheet[1]
+]
+
+geography_rules = []
+
+for row in geography_sheet.iter_rows(min_row=2, values_only=True):
+    if all(value is None for value in row):
+        continue
+
+    rule = dict(zip(geography_headers, row))
+    geography_rules.append(rule)
+
+print(f"Found {len(geography_rules)} geographic eligibility rules.")
+
+print("First geographic rule:", geography_rules[0])
+
 print("First program ID:", programs[0]["program_id"])
 print("First program name:", programs[0]["program_name"])
 print("First program FPL limit:", programs[0]["income_limit_fpl"])
@@ -26,7 +45,6 @@ main_columns = [
     "program_id",
     "program_name",
     "organization",
-    "residency_requirements",
     "additional_insurance_requirements",
     "income_limit_fpl",
     "other_income_requirements",
@@ -36,7 +54,6 @@ main_columns = [
     "application_url",
     "source_url",
     "notes",
-    "insurance_coverage",
     "min_age",
     "max_age"
 ]
@@ -44,7 +61,7 @@ for column in main_columns:
     if column not in headers:
         raise ValueError(f"Missing spreadsheet column: {column}")
 
-print("All 16 main table columns were found.")
+print(f"All {len(main_columns)} main table columns were found.")
     
 def sql_value(value):
     if value is None:
@@ -89,6 +106,42 @@ if len(program_ids) != len(unique_ids):
     raise ValueError("Duplicate program IDs found!")
 
 print("All program IDs are unique.")
+
+
+
+
+# Work for geography table
+
+geography_columns = [
+    "program_id",
+    "rule_group",
+    "location_type",
+    "country",
+    "state",
+    "county"
+]
+
+geography_insert_statements = []
+
+for rule in geography_rules:
+    values = [sql_value(rule[column]) for column in geography_columns]
+
+    column_names = ", ".join(geography_columns)
+    sql_values = ", ".join(values)
+
+    insert_sql = (
+        f"INSERT INTO assistance_program_geography ({column_names})\n"
+        f"VALUES ({sql_values});"
+    )
+
+    geography_insert_statements.append(insert_sql)
+
+print(f"\nGenerated {len(geography_insert_statements)} geography INSERT statements.")
+print("First geography INSERT:")
+print(geography_insert_statements[0])
+print("Last geography INSERT:")
+print(geography_insert_statements[-1])
+
 
 ##Work for cancer table
 
@@ -178,7 +231,9 @@ all_statements = (
     insert_statements
     + cancer_insert_statements
     + insurance_insert_statements
+    + geography_insert_statements
 )
+
 output_file = folder / "generated_assistance_seed.sql"
 sql_content = "\n\n".join(all_statements) + "\n"
 output_file.write_text(sql_content, encoding="utf-8")
