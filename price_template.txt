@@ -3,7 +3,7 @@
 CREATE TABLE (insert hospital)_price (
   hospital_id PRIMARY KEY
   treatment_type,
-  treatment_code PRIMARY KEY,
+  treatment_code,
   standard_charge_min,
   standard_charge_max,
   cancer_id UNIQUE,
