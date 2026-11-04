@@ -1,9 +1,9 @@
 (one such table for each hospital)
 
 CREATE TABLE (insert hospital)_price (
-  hospital_id PRIMARY KEY
+  hospital_id,
   treatment_type,
-  treatment_code,
+  treatment_id,
   standard_charge_min,
   standard_charge_max,
   cancer_id UNIQUE,
@@ -11,6 +11,7 @@ CREATE TABLE (insert hospital)_price (
     FOREIGN KEY (cancer_id)
     REFERENCES cancer_type(cancer_id)
     ON DELETE CASCADE
+  PRIMARY KEY (hospital_id, treatment_id)
     
 );
   
