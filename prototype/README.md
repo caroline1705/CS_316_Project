@@ -1,40 +1,34 @@
-# CureBase local prototype
+# CureBase integrated prototype
 
-Open **[prototype.html](prototype.html)** in a browser. The form starts blank. You can enter a profile or explicitly load one of four sample households.
+## Run
 
-## Files in this folder
-
-`prototype.html`: Generated runnable application with embedded records, styling and scripts. Open this file to use the prototype. Rebuilding overwrites it. 
-`template.html`: Editable page structure, styles and script insertion markers. This is an unbuilt source template, not the runnable application. 
-`app.js`: Form initialization, four sample households, conditional field visibility, validation feedback, result display, filters and pagination. 
-`engine.js`: Profile validation, household income/FPL calculation, medical and indirect cost estimates, assistance screening and financial ranking. Also holds fictional hospital age rules. 
-`build.py`: Loads the existing team SQL and separate test-price SQL into an in-memory SQLite database, independently imports addresses, and embeds the data and scripts into `prototype.html`. It does not modify the team's database. 
-`address_data.py`: Independent build-time importer and validator for the predefined address JSON file. 
-`distance_provider.js`: Independent browser address/distance lookup interface. It currently resolves fixtures; it can later be replaced by a map-service provider.
-
-## Test Data made up for this prototype
-
-The following data are made-up test data for this prototype:
-- 25 medical charge records (placeholder for Caroline's data)
-- A drop-down list of predetermined list of addresses, along with predetermined distance to each hospital (to actually implement this, we would have to use the service of an external map software, so maybe we can just leave it like this in the final product; currently, address fetching is implemented as an independent module)
-- Arbitrary age cutoffs for assisstance program policies
-- All five hospitals treated as offering every seeded regimen package
-
-In addition, the current prototype comes in with four predetermined sets of exemplar test data. 
-
-### Data reused from the existing project
-
-The build retains the team's five hospitals, diagnosis and regimen records, treatment phases, visit/duration summaries, 2026 poverty guidelines, mileage rates, FY2027 lodging rates, county childcare prices and assistance-program records from `../household/` and `../assistance/`.
-
-## Interface behavior
-
-All data uses ordinary text. Only prototype commentary and explicitly marked debug interfaces use italics. Required fields have a red asterisk.
-
-Childcare age group is visible, enabled and required only when **Children needing care** is greater than zero. Lost hourly pay is visible, enabled and required only when **Work hours lost / visit** is greater than zero. Both fields are hidden when the controlling input is blank or zero. A hidden hourly-pay value is ignored, so lost-wage costs are zero when work hours lost are zero. Values can be retained while hidden to allow toggling back without retyping them.
-
-## Rebuild and verify
-
-From the project root:
+In the project root, install Flask once:
 
 ```sh
-python3 prototype/build.py
+python3 -m venv prototype/.venv
+prototype/.venv/bin/python -m pip install 'Flask>=3.1,<4'
+prototype/.venv/bin/python prototype/app.py
+```
+
+Then open **http://127.0.0.1:5001** in a browser.
+
+`init_db.py` creates `prototype/curebase.db` from the existing `household/` and `assistance/` SQL files plus the price fixtures in `prototype/test_data/pricing/`. If the database is missing, startup exits with instructions to run `init_db.py`. For subsequent launches, run only `app.py`.
+
+
+## Files
+
+`app.py`: Runs the existing household Flask application, serves the new page, retains all nine original API handlers, and adds five integration endpoints. Configures the household and assistance modules to use the same prototype database at startup. |
+`init_db.py`: Creates the prototype SQLite database from existing SQL and price fixtures; supports an explicit rebuild. |
+`comparison.py`: Server-side validation, existing-service integration, medical estimates, assistance explanations and hospital ranking.
+`templates/prototype.html`: Flask HTML template retaining the original layout and styles. |
+`static/prototype.js`: Frontend form behavior, sample households, API requests, error handling and result display. |
+`address.py`: Address fixture loader and validation. |
+`test_data`: test address and price fixtures.
+
+Flask is the only direct external dependency.
+
+## Preserved data and behavior
+
+The four sample households, 25 fictional medical price records, four fictional addresses and their hospital distances, fictional hospital age rules, and assumed regimen offerings are retained. The colors, layout, conditional childcare/pay fields, cost tables, assistance cards, filters and one-hospital-per-page navigation are retained.
+
+Household calculations use the existing SQL/Python implementation. Comparison rates remain fixed to the original demonstration date, November 4, 2026, with FY2027 lodging rates. The standalone household indirect-cost endpoint retains its existing current-date behavior. Assistance screening uses the existing assistance matcher; exclusions are explained using that module's rule-checking functions. Unknown requirements and funding availability still require review. Assistance is never deducted from estimated costs.
