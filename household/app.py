@@ -13,6 +13,15 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 from assistance.assistance import find_matching_assistance
 
+## Adding so Flask can import prices
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
+from pricing.pricing import get_treatment_prices
+
 HERE = Path(__file__).parent
 app = Flask(__name__)
 
@@ -207,6 +216,30 @@ def api_assistance():
         return jsonify(error=str(e)), 400
 
     return jsonify(results)
+
+
+# ---------------------------------------------------------------- hospital prices
+@app.get("/api/treatment-prices")
+def api_treatment_prices():
+    hospital = request.args.get("hospital")
+    code = request.args.get("code")
+    code_type = request.args.get("code_type")
+    payer = request.args.get("payer")
+    plan = request.args.get("plan")
+
+    if not hospital or not code:
+        return jsonify({"error": "hospital and code are required"}), 400
+
+    prices = get_treatment_prices(
+        hospital_id=hospital,
+        code=code,
+        code_type=code_type,
+        payer_name=payer,
+        plan_name=plan
+    )
+
+    return jsonify(prices)
+
 
 if __name__ == "__main__":
     app.run(debug=True, port=5001)

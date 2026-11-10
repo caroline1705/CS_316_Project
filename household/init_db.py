@@ -12,7 +12,8 @@ SCRIPTS = [
     "seed_childcare.sql",                             # DOL county childcare prices
     "seed_hospital.sql",                              # hospitals in scope
     "../assistance/schema_assistance.sql",            # assistance tables
-    "../assistance/generated_assistance_seed.sql",    # assistance program data
+    "../assistance/generated_assistance_seed.sql",
+    "../pricing/schema_pricing.sql"                   # pricing tables
 ]
 
 if __name__ == "__main__":
