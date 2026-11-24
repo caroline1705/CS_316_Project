@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CureBase – Household & Indirect Costs</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+</head>
+<body class="bg-light">
+<div class="container py-4" style="max-width: 760px">
+  <h1 class="h3 mb-1">CureBase</h1>
+  <p class="text-muted">Estimate your household eligibility and the hidden costs of cancer treatment.</p>
+
+  <!-- ===== Card 1: FPL calculator (calls /api/fpl) ===== -->
+  <div class="card mb-4">
+    <div class="card-body">
+      <h2 class="h5">1. Household income vs. poverty level</h2>
+      <form id="fpl-form" class="row g-3">
+        <div class="col-sm-4">
+          <label class="form-label" for="size">Household size</label>
+          <input class="form-control" id="size" type="number" min="1" value="3" required>
+        </div>
+        <div class="col-sm-5">
+          <label class="form-label" for="income">Annual household income ($)</label>
+          <input class="form-control" id="income" type="number" min="0" value="60000" required>
+        </div>
+        <div class="col-sm-3">
+          <label class="form-label" for="state">State</label>
+          <select class="form-select" id="state">
+            <option value="NC" selected>NC</option>
+            <option value="AK">AK</option>
+            <option value="HI">HI</option>
+          </select>
+        </div>
+        <div class="col-12"><button class="btn btn-primary">Calculate</button></div>
+      </form>
+      <div id="fpl-result" class="mt-3"></div>
+    </div>
+  </div>
+
+  <!-- ===== Card 2: Indirect costs
+       (calls /api/cancers, /api/regimens, /api/regimen-detail, /api/hospitals,
+        /api/nc-counties, /api/indirect-costs) ===== -->
+  <div class="card mb-4">
+    <div class="card-body">
+      <h2 class="h5">2. Travel, lodging and childcare costs</h2>
+      <form id="cost-form" class="row g-3">
+        <div class="col-sm-5">
+          <label class="form-label" for="cancer">Cancer type</label>
+          <select class="form-select" id="cancer" required></select>
+        </div>
+        <div class="col-sm-7">
+          <label class="form-label" for="regimen">Treatment plan</label>
+          <select class="form-select" id="regimen" required></select>
+        </div>
+        <div class="col-12" id="regimen-detail"></div>
+        <div class="col-sm-6">
+          <label class="form-label" for="hospital">Hospital</label>
+          <select class="form-select" id="hospital" required></select>
+        </div>
+        <div class="col-sm-6">
+          <label class="form-label" for="distance">One-way distance to hospital (miles)</label>
+          <input class="form-control" id="distance" type="number" min="0" value="30" required>
+        </div>
+        <div class="col-12">
+          <fieldset>
+            <legend class="form-label fs-6 mb-1">Children who need care during hospital visits</legend>
+            <div class="row g-2">
+              <div class="col-6 col-sm-3">
+                <label class="form-label small" for="infants">Infant (0–2)</label>
+                <input class="form-control" id="infants" type="number" min="0" max="10" value="0">
+              </div>
+              <div class="col-6 col-sm-3">
+                <label class="form-label small" for="toddlers">Toddler (2–3)</label>
+                <input class="form-control" id="toddlers" type="number" min="0" max="10" value="0">
+              </div>
+              <div class="col-6 col-sm-3">
+                <label class="form-label small" for="preschoolers">Preschool (3–5)</label>
+                <input class="form-control" id="preschoolers" type="number" min="0" max="10" value="0">
+              </div>
+              <div class="col-6 col-sm-3">
+                <label class="form-label small" for="school_age">School age (5+)</label>
+                <input class="form-control" id="school_age" type="number" min="0" max="10" value="0">
+              </div>
+            </div>
+          </fieldset>
+        </div>
+        <div class="col-sm-6">
+          <label class="form-label" for="home_county">Your home county (sets childcare prices)</label>
+          <select class="form-select" id="home_county"></select>
+        </div>
+        <div class="col-12"><button class="btn btn-primary">Estimate costs</button></div>
+      </form>
+      <div id="cost-result" class="mt-3"></div>
+    </div>
+  </div>
+
+  <p class="small text-muted">Sources: 2026 HHS Poverty Guidelines; IRS 2026 medical mileage rate;
+    GSA FY2027 per diem rates; DOL National Database of Childcare Prices (2022, center-based median);
+    treatment schedules from published protocols and trials (linked under each plan).
+    Treatment plans are typical examples; a patient's actual plan is set by their care team.</p>
+</div>
+
+<script>
+const money = n => "$" + Number(n).toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2});
+const AGE_LABELS = {INFANT: "Infant", TODDLER: "Toddler", PRESCHOOL: "Preschool", SCHOOL_AGE: "School age"};
+const showError = (box, msg) => box.innerHTML = `<div class="alert alert-danger mb-0">${msg}</div>`;
+
+// Fill the dropdowns from the database when the page loads
+async function loadOptions() {
+  const cancers = await (await fetch("/api/cancers")).json();
+  document.getElementById("cancer").innerHTML = cancers.map(c =>
+    `<option value="${c.cancer_id}">${c.name} (ICD-10 ${c.icd10})</option>`).join("");
+  await loadRegimens();
+
+  const hospitals = await (await fetch("/api/hospitals")).json();
+  document.getElementById("hospital").innerHTML = hospitals.map(h =>
+    `<option value="${h.hospital_id}">${h.name} – ${h.city}</option>`).join("");
+  document.getElementById("hospital").value = "DUKE";
+
+  const home = await (await fetch("/api/nc-counties")).json();
+  document.getElementById("home_county").innerHTML =
+    `<option value="">Not sure (NC median)</option>` +
+    home.map(c => `<option value="${c}">${c} County</option>`).join("");
+}
+
+// Two-level menu: the treatment plans depend on the cancer type
+async function loadRegimens() {
+  const cancer = document.getElementById("cancer").value;
+  const regimens = await (await fetch("/api/regimens?cancer=" + encodeURIComponent(cancer))).json();
+  document.getElementById("regimen").innerHTML = regimens.map(r =>
+    `<option value="${r.regimen_id}">${r.regimen}</option>`).join("");
+  await showRegimenDetail();
+}
+
+// Show the phases, total visits and duration of the selected plan
+async function showRegimenDetail() {
+  const box = document.getElementById("regimen-detail");
+  const regimen = document.getElementById("regimen").value;
+  if (!regimen) { box.innerHTML = ""; return; }
+  const d = await (await fetch("/api/regimen-detail?regimen=" + encodeURIComponent(regimen))).json();
+  const every = p => p.cycle_days === 1 ? `${p.cycles} weekday sessions`
+      : `every ${p.cycle_days % 7 === 0 ? (p.cycle_days / 7) + " week" + (p.cycle_days === 7 ? "" : "s") : p.cycle_days + " days"} × ${p.cycles}`;
+  box.innerHTML = `<div class="border rounded bg-light p-2 small">
+      <div class="fw-semibold mb-1">${d.total_visits} hospital visits over about ${d.total_weeks} weeks</div>
+      <ol class="mb-1 ps-3">${d.phases.map(p =>
+        `<li>${p.treatment}: ${every(p)}${p.visits_per_cycle > 1 ? ` (${p.visits_per_cycle} visits each)` : ""}
+         <span class="text-muted">– starts week ${p.start_week}, ${p.visits} visits</span></li>`).join("")}</ol>
+      <a href="${d.source_url}" target="_blank" rel="noopener">Source</a>
+    </div>`;
+}
+
+document.getElementById("cancer").addEventListener("change", loadRegimens);
+document.getElementById("regimen").addEventListener("change", showRegimenDetail);
+
+// Card 1: send household info to /api/fpl and show the result
+document.getElementById("fpl-form").addEventListener("submit", async e => {
+  e.preventDefault();
+  const box = document.getElementById("fpl-result");
+  const params = new URLSearchParams({
+    size: document.getElementById("size").value,
+    income: document.getElementById("income").value,
+    state: document.getElementById("state").value,
+  });
+  const res = await fetch("/api/fpl?" + params);
+  const data = await res.json();
+  if (!res.ok) return showError(box, data.error);
+  box.innerHTML = `<div class="alert alert-info mb-0">
+      Your income is <strong>${data.fpl_percent}%</strong> of the federal poverty level
+      (100% = ${money(data.guideline)} for a household of ${data.household_size}).
+    </div>`;
+});
+
+// Card 2: send treatment and travel info to /api/indirect-costs and show a cost table
+document.getElementById("cost-form").addEventListener("submit", async e => {
+  e.preventDefault();
+  const box = document.getElementById("cost-result");
+  const params = new URLSearchParams({
+    regimen: document.getElementById("regimen").value,
+    hospital: document.getElementById("hospital").value,
+    distance: document.getElementById("distance").value,
+    infants: document.getElementById("infants").value || "0",
+    toddlers: document.getElementById("toddlers").value || "0",
+    preschoolers: document.getElementById("preschoolers").value || "0",
+    school_age: document.getElementById("school_age").value || "0",
+    home_county: document.getElementById("home_county").value,
+  });
+  const res = await fetch("/api/indirect-costs?" + params);
+  const d = await res.json();
+  if (!res.ok) return showError(box, d.error);
+  // Tell the user when data was missing and a fallback was used
+  const notes = [];
+  if (d.lodging_is_standard)
+    notes.push(`${d.county} County has no GSA county rate, so the NC standard lodging rate is used.`);
+  if (d.children > 0 && d.childcare_is_median)
+    notes.push(d.home_county
+      ? `No DOL childcare data for ${d.home_county} County, so the NC median is used.`
+      : `Home county not given, so the NC median childcare price is used.`);
+  notes.push(`Assumes one overnight stay per visit when the hospital is 100+ miles away, and one day of childcare per visit.`);
+  box.innerHTML = `
+    <p class="mb-2">About <strong>${d.total_visits} hospital visits</strong> to ${d.hospital_name} (${d.county} County).</p>
+    <table class="table table-sm mb-0">
+      <tr><td>Travel (${d.cents_per_mile}¢ per mile, round trip)</td><td class="text-end">${money(d.travel)}</td></tr>
+      <tr><td>Lodging and meals (if 100+ miles away)</td><td class="text-end">${money(d.lodging)}</td></tr>
+      <tr><td>Childcare (${d.children} child${d.children == 1 ? "" : "ren"}, one day of care per visit)</td><td class="text-end">${money(d.childcare)}</td></tr>
+      ${d.childcare_by_age.map(c => `<tr class="small text-muted"><td class="ps-4">${AGE_LABELS[c.age_group]} × ${c.children}: ${money(c.weekly_price)}/week ÷ 5 × ${d.total_visits} visits</td><td class="text-end">${money(c.cost)}</td></tr>`).join("")}
+      <tr class="fw-bold"><td>Total non-medical cost</td><td class="text-end">${money(d.total)}</td></tr>
+    </table>
+    <ul class="small text-muted mt-2 mb-0">${notes.map(n => `<li>${n}</li>`).join("")}</ul>`;
+});
+
+loadOptions();
+</script>
+</body>
+</html>
