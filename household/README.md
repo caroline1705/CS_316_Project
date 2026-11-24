@@ -14,8 +14,10 @@ python3 init_db.py    # builds curebase.db with all tables and data
 python3 app.py        # web page + API at http://127.0.0.1:5001
 ```
 
-Optional command-line checks: `python3 fpl.py` (FPL tests), `python3 regimen.py`,
-`python3 indirect.py` (sample cost estimates).
+Tests: `python3 -m unittest test_household -v` (10 tests: FPL, regimen visits, indirect
+costs, children of different ages, fallbacks, and API input validation).
+
+Optional command-line checks: `python3 fpl.py`, `python3 regimen.py`, `python3 indirect.py`.
 
 ## API
 
@@ -29,10 +31,12 @@ Optional command-line checks: `python3 fpl.py` (FPL tests), `python3 regimen.py`
 | `GET /api/hospitals` | The 5 hospitals in scope, with their counties |
 | `GET /api/nc-counties` | All 100 NC counties (home county for childcare) |
 | `GET /api/counties` | NC counties with their own GSA lodging rate |
-| `GET /api/indirect-costs` | `/api/indirect-costs?regimen=BREAST_ACT_H&hospital=DUKE&distance=150&children=1&home_county=Durham&age_group=PRESCHOOL` → `total: 12246.96` |
+| `GET /api/indirect-costs` | `/api/indirect-costs?regimen=CRC_FOLFOX&hospital=UNC&distance=40&home_county=Orange&infants=1&school_age=2` → `childcare: 2708.26` (1 infant + 2 school-age children), with a per-age breakdown in `childcare_by_age` |
 
 `hospital` decides the lodging rate (through its county; `county=<name>` also works);
-`home_county` decides the childcare price. The response flags `lodging_is_standard` and
+`home_county` decides the childcare price. Children needing care are given per age group
+(`infants`, `toddlers`, `preschoolers`, `school_age`; at most 10 in total). The older
+`children=<n>&age_group=<GROUP>` form still works. The response flags `lodging_is_standard` and
 `childcare_is_median` when county data is missing and a fallback is used.
 Errors: `400` invalid input, `404` unknown regimen or hospital.
 
@@ -42,7 +46,7 @@ Errors: `400` invalid input, `404` unknown regimen or hospital.
 |---|---|
 | `schema.sql`, `seed_2026.sql`, `fpl_query.sql` | Poverty guideline tables, 2026 data, FPL query |
 | `schema_regimen.sql`, `seed_regimen.sql`, `regimen_query.sql`, `regimen_detail_query.sql` | Cancer type / treatment / regimen tables, visit summary and phase detail queries |
-| `schema_indirect.sql`, `seed_indirect.sql`, `indirect_query.sql` | IRS mileage, GSA lodging, county childcare tables and cost query |
+| `schema_indirect.sql`, `seed_indirect.sql`, `indirect_query.sql`, `childcare_rates_query.sql` | IRS mileage, GSA lodging, county childcare tables and cost query |
 | `seed_childcare.sql`, `build_childcare_seed.py` | NC counties and childcare prices (generated from the DOL file) |
 | `seed_hospital.sql` | The 5 hospitals in scope (table defined in `schema_indirect.sql`) |
 | `init_db.py` | Builds the whole database |
@@ -70,5 +74,5 @@ Errors: `400` invalid input, `404` unknown regimen or hospital.
 
 ### Modeling assumptions
 - One overnight stay (GSA lodging + M&IE) per visit when the one-way distance is 100+ miles.
-- One day of childcare per visit = weekly center-based price ÷ 5, per child.
+- One day of childcare per visit = weekly center-based price ÷ 5, for each child, using the price for that child's age group.
 - Daily radiation counts as one visit per weekday session.

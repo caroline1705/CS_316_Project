@@ -62,21 +62,31 @@
           <label class="form-label" for="distance">One-way distance to hospital (miles)</label>
           <input class="form-control" id="distance" type="number" min="0" value="30" required>
         </div>
-        <div class="col-sm-4">
-          <label class="form-label" for="children">Children needing care</label>
-          <input class="form-control" id="children" type="number" min="0" max="10" value="0">
+        <div class="col-12">
+          <fieldset>
+            <legend class="form-label fs-6 mb-1">Children who need care during hospital visits</legend>
+            <div class="row g-2">
+              <div class="col-6 col-sm-3">
+                <label class="form-label small" for="infants">Infant (0–2)</label>
+                <input class="form-control" id="infants" type="number" min="0" max="10" value="0">
+              </div>
+              <div class="col-6 col-sm-3">
+                <label class="form-label small" for="toddlers">Toddler (2–3)</label>
+                <input class="form-control" id="toddlers" type="number" min="0" max="10" value="0">
+              </div>
+              <div class="col-6 col-sm-3">
+                <label class="form-label small" for="preschoolers">Preschool (3–5)</label>
+                <input class="form-control" id="preschoolers" type="number" min="0" max="10" value="0">
+              </div>
+              <div class="col-6 col-sm-3">
+                <label class="form-label small" for="school_age">School age (5+)</label>
+                <input class="form-control" id="school_age" type="number" min="0" max="10" value="0">
+              </div>
+            </div>
+          </fieldset>
         </div>
-        <div class="col-sm-4">
-          <label class="form-label" for="age_group">Children's age</label>
-          <select class="form-select" id="age_group">
-            <option value="INFANT">Infant (0–2)</option>
-            <option value="TODDLER">Toddler (2–3)</option>
-            <option value="PRESCHOOL" selected>Preschool (3–5)</option>
-            <option value="SCHOOL_AGE">School age (5+)</option>
-          </select>
-        </div>
-        <div class="col-sm-4">
-          <label class="form-label" for="home_county">Your home county</label>
+        <div class="col-sm-6">
+          <label class="form-label" for="home_county">Your home county (sets childcare prices)</label>
           <select class="form-select" id="home_county"></select>
         </div>
         <div class="col-12"><button class="btn btn-primary">Estimate costs</button></div>
@@ -93,6 +103,7 @@
 
 <script>
 const money = n => "$" + Number(n).toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2});
+const AGE_LABELS = {INFANT: "Infant", TODDLER: "Toddler", PRESCHOOL: "Preschool", SCHOOL_AGE: "School age"};
 const showError = (box, msg) => box.innerHTML = `<div class="alert alert-danger mb-0">${msg}</div>`;
 
 // Fill the dropdowns from the database when the page loads
@@ -168,8 +179,10 @@ document.getElementById("cost-form").addEventListener("submit", async e => {
     regimen: document.getElementById("regimen").value,
     hospital: document.getElementById("hospital").value,
     distance: document.getElementById("distance").value,
-    children: document.getElementById("children").value || "0",
-    age_group: document.getElementById("age_group").value,
+    infants: document.getElementById("infants").value || "0",
+    toddlers: document.getElementById("toddlers").value || "0",
+    preschoolers: document.getElementById("preschoolers").value || "0",
+    school_age: document.getElementById("school_age").value || "0",
     home_county: document.getElementById("home_county").value,
   });
   const res = await fetch("/api/indirect-costs?" + params);
@@ -189,7 +202,8 @@ document.getElementById("cost-form").addEventListener("submit", async e => {
     <table class="table table-sm mb-0">
       <tr><td>Travel (${d.cents_per_mile}¢ per mile, round trip)</td><td class="text-end">${money(d.travel)}</td></tr>
       <tr><td>Lodging and meals (if 100+ miles away)</td><td class="text-end">${money(d.lodging)}</td></tr>
-      <tr><td>Childcare (${d.children} child${d.children == 1 ? "" : "ren"}, ${money(d.childcare_weekly)}/week ÷ 5 per visit day)</td><td class="text-end">${money(d.childcare)}</td></tr>
+      <tr><td>Childcare (${d.children} child${d.children == 1 ? "" : "ren"}, one day of care per visit)</td><td class="text-end">${money(d.childcare)}</td></tr>
+      ${d.childcare_by_age.map(c => `<tr class="small text-muted"><td class="ps-4">${AGE_LABELS[c.age_group]} × ${c.children}: ${money(c.weekly_price)}/week ÷ 5 × ${d.total_visits} visits</td><td class="text-end">${money(c.cost)}</td></tr>`).join("")}
       <tr class="fw-bold"><td>Total non-medical cost</td><td class="text-end">${money(d.total)}</td></tr>
     </table>
     <ul class="small text-muted mt-2 mb-0">${notes.map(n => `<li>${n}</li>`).join("")}</ul>`;

@@ -5,6 +5,10 @@ from pathlib import Path
 from flask import Flask, request, jsonify, render_template
 from fpl import DB, fpl_percent
 from indirect import indirect_costs, AGE_GROUPS
+
+# URL parameter -> childcare age group
+AGE_PARAMS = {"infants": "INFANT", "toddlers": "TODDLER",
+              "preschoolers": "PRESCHOOL", "school_age": "SCHOOL_AGE"}
 from regimen import regimen_summary
 
 ## Added this chunk to allow Flask to import the assistance matching functions from my module
@@ -140,14 +144,19 @@ def api_nc_counties():
 @app.get("/api/indirect-costs")
 def api_indirect_costs():
     # 1. Read inputs, e.g.
-    #    ?regimen=BREAST_ACT_H&hospital=DUKE&distance=150&children=1&home_county=Durham&age_group=PRESCHOOL
+    #    ?regimen=BREAST_ACT_H&hospital=DUKE&distance=150&home_county=Durham&infants=1&school_age=2
+    #    Children by age: infants, toddlers, preschoolers, school_age (counts).
+    #    Older form still works: children=<n>&age_group=<INFANT|TODDLER|PRESCHOOL|SCHOOL_AGE>
     #    (county=<name> can be passed instead of hospital=<id>)
     try:
         regimen = request.args["regimen"]
         distance = float(request.args["distance"])
         children = int(request.args.get("children", "0"))
+        by_age = {group: int(request.args.get(param, "0"))
+                  for param, group in AGE_PARAMS.items()}
     except (KeyError, ValueError):
-        return jsonify(error="regimen and a numeric distance are required"), 400
+        return jsonify(error="regimen and a numeric distance are required, "
+                             "and children counts must be whole numbers"), 400
     hospital_id = request.args.get("hospital")
     county = request.args.get("county")
     home_county = request.args.get("home_county") or None
@@ -156,10 +165,14 @@ def api_indirect_costs():
         return jsonify(error="hospital (or county) is required"), 400
     if distance < 0:
         return jsonify(error="distance must be >= 0"), 400
-    if not 0 <= children <= 10:
-        return jsonify(error="children must be between 0 and 10"), 400
     if age_group not in AGE_GROUPS:
         return jsonify(error=f"age_group must be one of {', '.join(AGE_GROUPS)}"), 400
+    if any(n < 0 for n in by_age.values()) or children < 0:
+        return jsonify(error="children counts cannot be negative"), 400
+    use_by_age = sum(by_age.values()) > 0
+    total_children = sum(by_age.values()) if use_by_age else children
+    if total_children > 10:
+        return jsonify(error="at most 10 children in total"), 400
 
     conn = sqlite3.connect(DB)
     try:
@@ -176,13 +189,14 @@ def api_indirect_costs():
 
         # 3. Run the cost query
         result = indirect_costs(conn, regimen, distance, county, num_children=children,
-                                home_county=home_county, age_group=age_group)
+                                home_county=home_county, age_group=age_group,
+                                children_by_age=by_age if use_by_age else None)
     finally:
         conn.close()
 
     # 4. Return JSON
     return jsonify(regimen=regimen, hospital=hospital_id, hospital_name=hospital_name,
-                   county=county, distance_miles=distance, children=children,
+                   county=county, distance_miles=distance,
                    home_county=home_county, age_group=age_group, **result)
 
 
